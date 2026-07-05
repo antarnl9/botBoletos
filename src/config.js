@@ -19,7 +19,7 @@ function parseSources(value) {
     .split(';;')
     .map((part) => {
       const [label, url] = part.split('|').map((s) => s.trim());
-      return label && url ? { label, url } : null;
+      return label && url ? { label, url, mode: 'auto' } : null;
     })
     .filter(Boolean);
   return out.length ? out : null;
@@ -42,10 +42,25 @@ export const config = {
     {
       label: 'SeatGeek',
       url: 'https://seatgeek.com/fifa-world-cup-tickets/international-soccer/2026-07-05-6-pm/17650335',
+      mode: 'json',
     },
     {
       label: 'Viagogo',
       url: 'https://www.viagogo.com.mx/Boletos-Deportes/Futbol/Soccer-Tournament/Copa-Mundial-de-Futbol-Boletos/E-153033507',
+      mode: 'dollar',
+    },
+    {
+      // StubHub usa DataDome y no se puede scrapear; además comparte inventario con
+      // Viagogo (misma empresa/mismo event id), así que refleja los datos de Viagogo.
+      label: 'StubHub',
+      url: 'https://www.stubhub.com/world-cup-ciudad-de-mexico-tickets-7-5-2026/event/153033507/',
+      mirrorOf: 'Viagogo',
+    },
+    {
+      label: 'Ticombo',
+      url: 'https://www.ticombo.com/en/sports-tickets/football-tickets/match-92-r16-w79-vs-w80-football-world-cup-2026-2607052359/9eb3d927-c645-4c56-8d7a-3a9735956a03',
+      mode: 'dollarFreq',
+      wait: 8000,
     },
   ],
 

@@ -9,9 +9,9 @@ import { sendTelegram } from './src/telegram.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const state = {
-  event: null, // { title, datetime, venue }
-  sources: [], // [ { label, url, lowest, highest, average, listingCount, error } ]
-  cheapest: null, // la fuente con el precio más bajo
+  event: null,
+  sources: [],
+  cheapest: null,
   lastCheck: null,
   error: null,
   scrapeError: null,
@@ -21,6 +21,25 @@ const state = {
   pollIntervalMinutes: config.pollIntervalMinutes,
   inScrapeWindow: true,
 };
+
+// Estado persistente por fuente: CONSERVA el último precio visto aunque un scrape
+// falle o estemos fuera de ventana (así las cards no se "borran").
+const sourceState = {};
+for (const src of config.sources) {
+  sourceState[src.label] = {
+    label: src.label,
+    url: src.url,
+    mirrorOf: src.mirrorOf || null,
+    note: src.mirrorOf ? `mismo inventario que ${src.mirrorOf}` : null,
+    lowest: null,
+    highest: null,
+    average: null,
+    listingCount: null,
+    lastUpdated: null,
+    error: null,
+    stale: false,
+  };
+}
 
 let lastAlertedLow = null;
 
@@ -33,7 +52,6 @@ function fmtVenue(v) {
   return [v.name, v.city, v.country].filter(Boolean).join(', ');
 }
 
-// ¿Estamos dentro de la ventana horaria para scrapear? (ahorra créditos)
 function withinScrapeWindow() {
   const s = config.scrapeStartHour;
   const e = config.scrapeEndHour;
@@ -41,7 +59,7 @@ function withinScrapeWindow() {
   const h = Number(
     new Intl.DateTimeFormat('en-US', { timeZone: config.scrapeTz, hour: '2-digit', hour12: false }).format(new Date())
   );
-  return s <= e ? h >= s && h < e : h >= s || h < e; // soporta ventanas que cruzan medianoche
+  return s <= e ? h >= s && h < e : h >= s || h < e;
 }
 
 async function maybeAlert() {
@@ -50,7 +68,6 @@ async function maybeAlert() {
   if (!config.priceThreshold || low == null) return;
 
   if (low <= config.priceThreshold) {
-    // Avisa la primera vez que baja del límite, y de nuevo si marca un nuevo mínimo.
     if (lastAlertedLow == null || low < lastAlertedLow) {
       const text =
         `🎟️ <b>¡Bajó de tu límite!</b>\n` +
@@ -63,7 +80,7 @@ async function maybeAlert() {
       console.log(`[alert] ${fmtMoney(low)} en ${c.label}`);
     }
   } else {
-    lastAlertedLow = null; // volvió a subir: rearmamos para la próxima baja
+    lastAlertedLow = null;
   }
 }
 
@@ -75,7 +92,7 @@ async function poll() {
   }
   polling = true;
   try {
-    // 1) Metadata del evento (título / estadio / fecha) desde la API oficial (gratis)
+    // 1) Metadata del evento (título/estadio/fecha) desde la API oficial (gratis)
     try {
       const evs = await fetchEvents({
         clientId: config.seatgeekClientId,
@@ -88,32 +105,67 @@ async function poll() {
       console.error('[meta] error:', e.message);
     }
 
-    // 2) Precios: scrapear cada fuente (si hay key y estamos en ventana horaria)
     const inWindow = withinScrapeWindow();
     state.inScrapeWindow = inWindow;
 
     if (config.scrapingbee.apiKey && inWindow) {
-      const results = [];
+      // 2) Scrapear fuentes reales (no mirror). Si falla, se CONSERVA el último precio.
       for (const src of config.sources) {
-        const r = { label: src.label, url: src.url, lowest: null, highest: null, average: null, listingCount: null, error: null };
+        if (src.mirrorOf) continue;
+        const st = sourceState[src.label];
         try {
-          Object.assign(r, await scrapePrices({ apiKey: config.scrapingbee.apiKey, stealth: config.scrapingbee.stealth, url: src.url }));
+          const r = await scrapePrices({
+            apiKey: config.scrapingbee.apiKey,
+            stealth: config.scrapingbee.stealth,
+            url: src.url,
+            mode: src.mode,
+            wait: src.wait,
+          });
+          if (r.lowest != null) {
+            st.lowest = r.lowest;
+            st.highest = r.highest;
+            st.average = r.average;
+            st.listingCount = r.listingCount;
+            st.lastUpdated = new Date().toISOString();
+            st.error = null;
+            st.stale = false;
+          } else {
+            st.error = 'sin precio en esta lectura';
+            st.stale = st.lowest != null; // conserva lo anterior
+          }
         } catch (e) {
-          r.error = e.message;
+          st.error = e.message.slice(0, 120);
+          st.stale = st.lowest != null; // conserva el último precio conocido
         }
-        results.push(r);
-        console.log(`[scrape] ${src.label}: ${r.lowest ?? 'error'} (${r.listingCount ?? '?'} listados)`);
+        console.log(`[scrape] ${src.label}: ${st.lowest ?? 'null'} ${st.error ? '· ' + st.error.slice(0, 40) : ''}`);
       }
-      state.sources = results;
-      state.scrapeError = results.length && results.every((r) => r.error) ? results[0].error : null;
-    } else if (!config.scrapingbee.apiKey) {
-      state.sources = config.sources.map((s) => ({ label: s.label, url: s.url, lowest: null, error: 'falta SCRAPINGBEE_API_KEY' }));
-    }
-    // Fuera de ventana: dejamos los últimos precios vistos (no gastamos créditos).
 
-    // 3) El más barato entre las fuentes con precio
-    const withPrice = state.sources.filter((s) => s.lowest != null);
-    state.cheapest = withPrice.length ? withPrice.reduce((a, b) => (b.lowest < a.lowest ? b : a)) : null;
+      // 3) Mirrors (StubHub): copian el resultado de su fuente origen (Viagogo)
+      for (const src of config.sources) {
+        if (!src.mirrorOf) continue;
+        const st = sourceState[src.label];
+        const from = sourceState[src.mirrorOf];
+        if (from && from.lowest != null) {
+          st.lowest = from.lowest;
+          st.highest = from.highest;
+          st.average = from.average;
+          st.listingCount = from.listingCount;
+          st.lastUpdated = from.lastUpdated;
+          st.stale = from.stale;
+          st.error = null;
+        }
+      }
+      state.scrapeError = null;
+    } else if (!config.scrapingbee.apiKey) {
+      for (const src of config.sources) sourceState[src.label].error = 'falta SCRAPINGBEE_API_KEY';
+    }
+    // Fuera de ventana: no tocamos nada → las cards conservan el último precio.
+
+    state.sources = config.sources.map((s) => ({ ...sourceState[s.label] }));
+
+    // 4) Más barato entre las fuentes REALES (no mirror) con precio
+    const real = state.sources.filter((s) => !s.mirrorOf && s.lowest != null);
+    state.cheapest = real.length ? real.reduce((a, b) => (b.lowest < a.lowest ? b : a)) : null;
 
     state.lastCheck = new Date().toISOString();
     state.error = null;
@@ -134,18 +186,19 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 app.listen(config.port, () => {
   console.log(`🚀 Servidor en http://localhost:${config.port}`);
-  console.log(`   Fuentes: ${config.sources.map((s) => s.label).join(', ')}`);
+  console.log(`   Fuentes: ${config.sources.map((s) => s.label + (s.mirrorOf ? `(↔${s.mirrorOf})` : '')).join(', ')}`);
   console.log(`   Umbral de aviso: ${config.priceThreshold ? fmtMoney(config.priceThreshold) : 'DESACTIVADO'}`);
   if (config.scrapingbee.apiKey) {
     const win = config.scrapeStartHour <= 0 && config.scrapeEndHour >= 24
       ? 'siempre'
       : `${config.scrapeStartHour}:00–${config.scrapeEndHour}:00 ${config.scrapeTz}`;
-    const perPoll = config.sources.length * (config.scrapingbee.stealth ? 75 : 25);
-    console.log(`   Scraping: ON · ventana ${win} · cada ${config.pollIntervalMinutes} min · ~${perPoll} créditos/ronda (${config.sources.length} fuentes)`);
+    const realCount = config.sources.filter((s) => !s.mirrorOf).length;
+    const perPoll = realCount * (config.scrapingbee.stealth ? 75 : 25);
+    console.log(`   Scraping: ON · ventana ${win} · cada ${config.pollIntervalMinutes} min · ~${perPoll} créditos/ronda`);
   } else {
     console.log('   Scraping: OFF (falta SCRAPINGBEE_API_KEY)');
   }
 
-  poll(); // primera revisión inmediata
+  poll();
   setInterval(poll, config.pollIntervalMinutes * 60 * 1000);
 });

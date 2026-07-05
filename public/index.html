@@ -35,6 +35,8 @@
     .price .val { font-size:1.15rem; font-weight:700; }
     .price.low .val { color:var(--accent); }
     .cerr { color:var(--warn); font-size:.82rem; }
+    .csub { font-size:.72rem; color:var(--muted); margin:-4px 0 10px; display:flex; gap:12px; flex-wrap:wrap; }
+    .csub .stale { color:var(--warn); }
     .empty { text-align:center; color:var(--muted); padding:30px 0; }
     footer { text-align:center; color:var(--muted); font-size:.75rem; margin-top:22px; }
   </style>
@@ -51,6 +53,7 @@
   <script>
     const money = (c, n) => n == null ? 's/d' : `${c} $${Number(n).toLocaleString('en-US')}`;
     const fmtDate = (iso) => { if (!iso) return ''; try { return new Date(iso).toLocaleString('es-MX',{dateStyle:'medium',timeStyle:'short'}); } catch { return iso; } };
+    const fmtTime = (iso) => { if (!iso) return '—'; try { return new Date(iso).toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'}); } catch { return ''; } };
     const venue = (v) => v ? [v.name, v.city, v.country].filter(Boolean).join(', ') : '';
 
     async function load() {
@@ -85,8 +88,13 @@
               <div class="name">${src.label} ${isCheapest ? '<span class="tag">más barato</span>' : ''}</div>
               ${src.url ? `<a class="buy" href="${src.url}" target="_blank" rel="noopener">Ver / comprar →</a>` : ''}
             </div>
-            ${src.error && src.lowest == null
-              ? `<div class="cerr">⚠️ ${src.error.slice(0,120)}</div>`
+            <div class="csub">
+              ${src.note ? `<span>↔ ${src.note}</span>` : ''}
+              <span>actualizado ${fmtTime(src.lastUpdated)}</span>
+              ${src.stale ? '<span class="stale">⚠ precio anterior (último intento falló)</span>' : ''}
+            </div>
+            ${src.lowest == null
+              ? `<div class="cerr">⚠️ ${(src.error || 'sin datos aún').slice(0,120)}</div>`
               : `<div class="prices">
                   <div class="price ${hot ? 'low' : ''}"><span class="label">Más barato</span><span class="val">${money(cur, src.lowest)}</span></div>
                   <div class="price"><span class="label">Promedio</span><span class="val">${money(cur, src.average)}</span></div>
