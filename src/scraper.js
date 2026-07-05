@@ -11,7 +11,9 @@ export async function scrapePrices({ apiKey, url, stealth, mode = 'auto', wait, 
       return await doScrape({ apiKey, url, stealth, wait, mode });
     } catch (e) {
       lastErr = e;
-      const transient = /\b(500|502|503|504)\b|abort|timeout/i.test(e.message);
+      // Reintenta solo fallos RÁPIDOS (5xx). En timeouts no reintenta (alargaría demasiado);
+      // el "conservar último precio" + la siguiente ronda cubren ese caso.
+      const transient = /\b(500|502|503|504)\b/.test(e.message);
       if (attempt < retries && transient) {
         await new Promise((r) => setTimeout(r, 3000));
         continue;

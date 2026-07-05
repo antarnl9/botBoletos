@@ -91,6 +91,7 @@
             <div class="csub">
               ${src.note ? `<span>↔ ${src.note}</span>` : ''}
               <span>actualizado ${fmtTime(src.lastUpdated)}</span>
+              ${src.converted ? '<span>convertido de MXN</span>' : ''}
               ${src.stale ? '<span class="stale">⚠ precio anterior (último intento falló)</span>' : ''}
             </div>
             ${src.lowest == null

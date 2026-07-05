@@ -38,7 +38,24 @@ for (const src of config.sources) {
     lastUpdated: null,
     error: null,
     stale: false,
+    converted: false,
   };
+}
+
+// Normaliza a USD: si el "más barato" sale > $20,000 casi seguro viene en MXN
+// (el get-in en USD de este partido anda en miles), así que se divide al tipo de cambio.
+function normalizeToUsd(r) {
+  const rate = config.mxnPerUsd;
+  if (r.lowest != null && r.lowest > 20000 && rate > 1) {
+    return {
+      lowest: Math.round(r.lowest / rate),
+      highest: r.highest != null ? Math.round(r.highest / rate) : null,
+      average: r.average != null ? Math.round(r.average / rate) : null,
+      listingCount: r.listingCount,
+      converted: true,
+    };
+  }
+  return { ...r, converted: false };
 }
 
 let lastAlertedLow = null;
@@ -109,36 +126,40 @@ async function poll() {
     state.inScrapeWindow = inWindow;
 
     if (config.scrapingbee.apiKey && inWindow) {
-      // 2) Scrapear fuentes reales (no mirror). Si falla, se CONSERVA el último precio.
-      for (const src of config.sources) {
-        if (src.mirrorOf) continue;
-        const st = sourceState[src.label];
-        try {
-          const r = await scrapePrices({
-            apiKey: config.scrapingbee.apiKey,
-            stealth: config.scrapingbee.stealth,
-            url: src.url,
-            mode: src.mode,
-            wait: src.wait,
-          });
-          if (r.lowest != null) {
-            st.lowest = r.lowest;
-            st.highest = r.highest;
-            st.average = r.average;
-            st.listingCount = r.listingCount;
-            st.lastUpdated = new Date().toISOString();
-            st.error = null;
-            st.stale = false;
-          } else {
-            st.error = 'sin precio en esta lectura';
-            st.stale = st.lowest != null; // conserva lo anterior
+      // 2) Scrapear fuentes reales (no mirror) EN PARALELO. Si falla, se CONSERVA el último precio.
+      const realSources = config.sources.filter((s) => !s.mirrorOf);
+      await Promise.all(
+        realSources.map(async (src) => {
+          const st = sourceState[src.label];
+          try {
+            const raw = await scrapePrices({
+              apiKey: config.scrapingbee.apiKey,
+              stealth: config.scrapingbee.stealth,
+              url: src.url,
+              mode: src.mode,
+              wait: src.wait,
+            });
+            const r = normalizeToUsd(raw); // MXN -> USD si viene en pesos
+            if (r.lowest != null) {
+              st.lowest = r.lowest;
+              st.highest = r.highest;
+              st.average = r.average;
+              st.listingCount = r.listingCount;
+              st.converted = r.converted;
+              st.lastUpdated = new Date().toISOString();
+              st.error = null;
+              st.stale = false;
+            } else {
+              st.error = 'sin precio en esta lectura';
+              st.stale = st.lowest != null; // conserva lo anterior
+            }
+          } catch (e) {
+            st.error = e.message.slice(0, 120);
+            st.stale = st.lowest != null; // conserva el último precio conocido
           }
-        } catch (e) {
-          st.error = e.message.slice(0, 120);
-          st.stale = st.lowest != null; // conserva el último precio conocido
-        }
-        console.log(`[scrape] ${src.label}: ${st.lowest ?? 'null'} ${st.error ? '· ' + st.error.slice(0, 40) : ''}`);
-      }
+          console.log(`[scrape] ${src.label}: ${st.lowest ?? 'null'}${st.converted ? ' (MXN→USD)' : ''} ${st.error ? '· ' + st.error.slice(0, 40) : ''}`);
+        })
+      );
 
       // 3) Mirrors (StubHub): copian el resultado de su fuente origen (Viagogo)
       for (const src of config.sources) {
@@ -152,6 +173,7 @@ async function poll() {
           st.listingCount = from.listingCount;
           st.lastUpdated = from.lastUpdated;
           st.stale = from.stale;
+          st.converted = from.converted;
           st.error = null;
         }
       }

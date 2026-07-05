@@ -65,6 +65,10 @@ export const config = {
     },
   ],
 
+  // Tipo de cambio para normalizar a USD cuando un sitio devuelve MXN.
+  // Si el "más barato" de una fuente sale > $20,000 se asume MXN y se divide entre esto.
+  mxnPerUsd: num(process.env.MXN_PER_USD, 18),
+
   // --- Alertas ---
   priceThreshold: num(process.env.PRICE_THRESHOLD, 0),
   pollIntervalMinutes: num(process.env.POLL_INTERVAL_MINUTES, 2),
