@@ -1,0 +1,19 @@
+{
+  "name": "seatgeek-price-bot",
+  "version": "1.0.0",
+  "description": "Bot que avisa por Telegram cuando bajan los precios de un evento en SeatGeek + front sencillo",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "chatid": "node scripts/get-chat-id.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  }
+}

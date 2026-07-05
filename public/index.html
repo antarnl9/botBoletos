@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Precios · SeatGeek Bot</title>
+  <style>
+    :root {
+      --bg: #0f1115; --card: #181b22; --border: #262a33;
+      --text: #e8eaed; --muted: #9aa0aa; --accent: #35c15e; --warn: #f5a623;
+    }
+    @media (prefers-color-scheme: light) {
+      :root { --bg:#f4f5f7; --card:#fff; --border:#e3e5ea; --text:#1a1d24; --muted:#6b7280; }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg); color: var(--text); padding: 24px 16px; line-height: 1.4;
+    }
+    .wrap { max-width: 820px; margin: 0 auto; }
+    h1 { font-size: 1.4rem; margin: 0 0 4px; }
+    .sub { color: var(--muted); font-size: .85rem; margin: 0 0 20px; }
+    .meta { display:flex; flex-wrap:wrap; gap:8px 16px; font-size:.8rem; color:var(--muted); margin-bottom:16px; }
+    .badge { background:var(--card); border:1px solid var(--border); border-radius:20px; padding:4px 12px; }
+    .badge.demo { color:var(--warn); border-color:var(--warn); }
+    .card {
+      background: var(--card); border:1px solid var(--border); border-radius:14px;
+      padding:16px 18px; margin-bottom:12px;
+    }
+    .card.hot { border-color: var(--accent); box-shadow:0 0 0 1px var(--accent) inset; }
+    .card h2 { font-size:1.05rem; margin:0 0 6px; }
+    .row { display:flex; flex-wrap:wrap; justify-content:space-between; gap:8px; align-items:baseline; }
+    .place { color:var(--muted); font-size:.9rem; }
+    .prices { display:flex; flex-wrap:wrap; gap:18px; margin-top:12px; }
+    .price { display:flex; flex-direction:column; }
+    .price .label { font-size:.7rem; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+    .price .val { font-size:1.1rem; font-weight:700; }
+    .price.low .val { color: var(--accent); }
+    .buy { font-size:.82rem; color:var(--accent); text-decoration:none; }
+    .empty { text-align:center; color:var(--muted); padding:40px 0; }
+    .err { color:var(--warn); font-size:.85rem; }
+    footer { text-align:center; color:var(--muted); font-size:.75rem; margin-top:24px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>🎟️ Precios de boletos</h1>
+    <p class="sub">Monitoreo automático vía SeatGeek. La lista se actualiza sola.</p>
+    <div class="meta" id="meta"></div>
+    <div id="list"><p class="empty">Cargando…</p></div>
+    <footer>Se actualiza cada 60&nbsp;s · <span id="clock"></span></footer>
+  </div>
+
+  <script>
+    const money = (c, n) => n == null ? 's/d' : `${c} $${Number(n).toLocaleString('en-US')}`;
+    const fmtDate = (iso) => {
+      if (!iso) return 'Fecha por confirmar';
+      try { return new Date(iso).toLocaleString('es-MX', { dateStyle:'medium', timeStyle:'short' }); }
+      catch { return iso; }
+    };
+    const venue = (v) => v ? [v.name, v.city, v.country].filter(Boolean).join(', ') : 'Lugar por confirmar';
+
+    async function load() {
+      try {
+        const r = await fetch('/api/prices');
+        const s = await r.json();
+        render(s);
+      } catch (e) {
+        document.getElementById('list').innerHTML = `<p class="err">No se pudo conectar al servidor.</p>`;
+      }
+      document.getElementById('clock').textContent = 'últ. carga ' + new Date().toLocaleTimeString('es-MX');
+    }
+
+    function render(s) {
+      const meta = document.getElementById('meta');
+      const cur = s.currency || 'USD';
+      meta.innerHTML = [
+        s.demoMode ? `<span class="badge demo">MODO DEMO (sin API real)</span>` : `<span class="badge">API en vivo</span>`,
+        s.threshold ? `<span class="badge">Aviso si baja de ${money(cur, s.threshold)}</span>` : `<span class="badge">Sin umbral de aviso</span>`,
+        s.lastCheck ? `<span class="badge">Últ. chequeo: ${fmtDate(s.lastCheck)}</span>` : '',
+      ].filter(Boolean).join('');
+
+      const list = document.getElementById('list');
+      if (s.error) {
+        list.innerHTML = `<div class="card"><p class="err">⚠️ ${s.error}</p></div>`;
+        return;
+      }
+      if (!s.events || !s.events.length) {
+        list.innerHTML = `<p class="empty">Sin eventos que coincidan todavía.</p>`;
+        return;
+      }
+
+      list.innerHTML = s.events.map((e) => {
+        const hot = s.threshold && e.stats.lowest != null && e.stats.lowest <= s.threshold;
+        return `
+          <div class="card ${hot ? 'hot' : ''}">
+            <div class="row">
+              <h2>${e.title}</h2>
+              ${e.url ? `<a class="buy" href="${e.url}" target="_blank" rel="noopener">Ver en SeatGeek →</a>` : ''}
+            </div>
+            <div class="place">📍 ${venue(e.venue)} &nbsp;·&nbsp; 📅 ${fmtDate(e.datetime)}</div>
+            <div class="prices">
+              <div class="price ${hot ? 'low' : ''}"><span class="label">Más barato</span><span class="val">${money(cur, e.stats.lowest)}</span></div>
+              <div class="price"><span class="label">Mediana</span><span class="val">${money(cur, e.stats.median)}</span></div>
+              <div class="price"><span class="label">Más alto</span><span class="val">${money(cur, e.stats.highest)}</span></div>
+              <div class="price"><span class="label">Listados</span><span class="val">${e.stats.listingCount ?? 0}</span></div>
+            </div>
+          </div>`;
+      }).join('');
+    }
+
+    load();
+    setInterval(load, 60000);
+  </script>
+</body>
+</html>
