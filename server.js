@@ -17,8 +17,9 @@ const state = {
   threshold: config.priceThreshold,
   currency: config.currency,
   pollIntervalMinutes: config.pollIntervalMinutes,
-  source: 'api', // 'api' | 'scrape'
+  source: 'api', // 'api' | 'scrape' | 'scrape-pausado'
   scrapeError: null,
+  inScrapeWindow: true,
 };
 
 // Anti-spam: por evento guardamos el ultimo precio bajo que ya avisamos.
@@ -44,6 +45,16 @@ function fmtDate(iso) {
   } catch {
     return iso;
   }
+}
+
+function withinScrapeWindow() {
+  const s = config.scrapeStartHour;
+  const e = config.scrapeEndHour;
+  if (s <= 0 && e >= 24) return true; // sin ventana = siempre
+  const h = Number(
+    new Intl.DateTimeFormat('en-US', { timeZone: config.scrapeTz, hour: '2-digit', hour12: false }).format(new Date())
+  );
+  return s <= e ? h >= s && h < e : h >= s || h < e; // soporta ventanas que cruzan medianoche
 }
 
 async function maybeAlert(ev) {
@@ -85,8 +96,11 @@ async function poll() {
     });
 
     // Los eventos del Mundial no traen precios por la API pública. Si hay
-    // ScrapingBee configurado, leemos los precios reales de la página web.
-    if (config.scrapingbee.apiKey && events.length) {
+    // ScrapingBee configurado (y estamos dentro de la ventana horaria), leemos
+    // los precios reales de la página web.
+    const inWindow = withinScrapeWindow();
+    state.inScrapeWindow = inWindow;
+    if (config.scrapingbee.apiKey && events.length && inWindow) {
       state.source = 'scrape';
       for (const ev of events) {
         const target = config.eventUrl || ev.url;
@@ -110,6 +124,8 @@ async function poll() {
           console.error('[scrape] error:', se.message);
         }
       }
+    } else if (config.scrapingbee.apiKey && !inWindow) {
+      state.source = 'scrape-pausado'; // fuera de ventana horaria: no gasta créditos
     } else {
       state.source = 'api';
     }
@@ -144,7 +160,11 @@ app.listen(config.port, () => {
     const perDay = Math.round((24 * 60) / config.pollIntervalMinutes);
     const credits = perDay * (config.scrapingbee.stealth ? 75 : 25);
     console.log(`   Scraping: ON (${config.scrapingbee.stealth ? 'stealth 75' : 'premium 25'} créditos/consulta)`);
-    console.log(`   ⚠️  A cada ${config.pollIntervalMinutes} min gastarías ~${credits.toLocaleString()} créditos/día (free = 1,000).`);
+    const win = config.scrapeStartHour <= 0 && config.scrapeEndHour >= 24
+      ? 'siempre (sin ventana)'
+      : `${config.scrapeStartHour}:00–${config.scrapeEndHour}:00 ${config.scrapeTz}`;
+    console.log(`   Ventana de scraping: ${win}`);
+    console.log(`   ⚠️  Dentro de la ventana, a cada ${config.pollIntervalMinutes} min gastas ${config.scrapingbee.stealth ? 75 : 25} créditos/consulta (free = 1,000).`);
   } else {
     console.log(`   Scraping: OFF (solo API oficial; el Mundial no traerá precios)`);
   }

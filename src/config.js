@@ -44,6 +44,11 @@ export const config = {
     apiKey: process.env.SCRAPINGBEE_API_KEY || '',
     stealth: (process.env.SCRAPINGBEE_STEALTH || 'true').toLowerCase() === 'true',
   },
+  // Ventana horaria para ahorrar créditos: FUERA de estas horas NO se scrapea (0 créditos).
+  // 0 y 24 = siempre. Las horas son en la zona de abajo (por defecto Ciudad de México).
+  scrapeStartHour: num(process.env.SCRAPE_START_HOUR, 0),
+  scrapeEndHour: num(process.env.SCRAPE_END_HOUR, 24),
+  scrapeTz: process.env.SCRAPE_TZ || 'America/Mexico_City',
 
   // --- Telegram ---
   telegram: {
