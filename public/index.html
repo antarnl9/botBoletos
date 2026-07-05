@@ -101,7 +101,7 @@
             <div class="place">📍 ${venue(e.venue)} &nbsp;·&nbsp; 📅 ${fmtDate(e.datetime)}</div>
             <div class="prices">
               <div class="price ${hot ? 'low' : ''}"><span class="label">Más barato</span><span class="val">${money(cur, e.stats.lowest)}</span></div>
-              <div class="price"><span class="label">Mediana</span><span class="val">${money(cur, e.stats.median)}</span></div>
+              <div class="price"><span class="label">Promedio</span><span class="val">${money(cur, e.stats.median)}</span></div>
               <div class="price"><span class="label">Más alto</span><span class="val">${money(cur, e.stats.highest)}</span></div>
               <div class="price"><span class="label">Listados</span><span class="val">${e.stats.listingCount ?? 0}</span></div>
             </div>

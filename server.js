@@ -100,7 +100,7 @@ async function poll() {
           if (s.lowest != null) {
             ev.stats.lowest = s.lowest;
             ev.stats.highest = s.highest ?? ev.stats.highest;
-            ev.stats.median = s.median ?? ev.stats.median;
+            ev.stats.median = s.average ?? ev.stats.median;
           }
           if (s.listingCount != null) ev.stats.listingCount = s.listingCount;
           state.scrapeError = null;
