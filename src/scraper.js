@@ -9,6 +9,7 @@ export async function scrapeSeatGeek({ apiKey, url, stealth }) {
   api.searchParams.set('api_key', apiKey);
   api.searchParams.set('url', url);
   api.searchParams.set('render_js', 'true'); // ejecutar el JS de la página
+  api.searchParams.set('block_resources', 'false'); // ScrapingBee lo pide para sitios que no cargan bien
   api.searchParams.set('wait', '8000'); // esperar 8s a que carguen los listados
   api.searchParams.set('country_code', 'us');
   // proxy para pasar Cloudflare: stealth (75 créditos) es más potente; premium (25) más barato
