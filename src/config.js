@@ -48,6 +48,7 @@ export const config = {
       label: 'Viagogo',
       url: 'https://www.viagogo.com.mx/Boletos-Deportes/Futbol/Soccer-Tournament/Copa-Mundial-de-Futbol-Boletos/E-153033507',
       mode: 'dollar',
+      wait: 6000,
     },
     {
       // StubHub usa DataDome y no se puede scrapear; además comparte inventario con

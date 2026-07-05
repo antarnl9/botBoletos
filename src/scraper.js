@@ -3,7 +3,26 @@
 
 const SCRAPINGBEE = 'https://app.scrapingbee.com/api/v1/';
 
-export async function scrapePrices({ apiKey, url, stealth, mode = 'auto', wait }) {
+// Reintenta en errores transitorios (500/timeout). ScrapingBee no cobra los fallos.
+export async function scrapePrices({ apiKey, url, stealth, mode = 'auto', wait, retries = 2 }) {
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await doScrape({ apiKey, url, stealth, wait, mode });
+    } catch (e) {
+      lastErr = e;
+      const transient = /\b(500|502|503|504)\b|abort|timeout/i.test(e.message);
+      if (attempt < retries && transient) {
+        await new Promise((r) => setTimeout(r, 3000));
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw lastErr;
+}
+
+async function doScrape({ apiKey, url, stealth, wait, mode }) {
   const api = new URL(SCRAPINGBEE);
   api.searchParams.set('api_key', apiKey);
   api.searchParams.set('url', url);
@@ -22,7 +41,7 @@ export async function scrapePrices({ apiKey, url, stealth, mode = 'auto', wait }
     const res = await fetch(api, { signal: ctrl.signal });
     if (!res.ok) {
       const body = await res.text().catch(() => '');
-      throw new Error(`ScrapingBee ${res.status}: ${body.slice(0, 300)}`);
+      throw new Error(`ScrapingBee ${res.status}: ${body.slice(0, 200)}`);
     }
     return parseListings(await res.text(), mode);
   } finally {
@@ -35,10 +54,10 @@ const median = (arr) => (arr.length ? arr.slice().sort((a, b) => a - b)[Math.flo
 // modos:
 //  'json'       -> SeatGeek: precios en campos JSON (lowest_price / listing_count)
 //  'dollar'     -> Viagogo: monto "$" más bajo (>= FLOOR)
-//  'dollarFreq' -> Ticombo: monto "$" más bajo que se REPITE (ignora filtros/basura sueltos)
+//  'dollarFreq' -> Ticombo: monto "$" real más bajo (aparece >=2 veces y NO es preset redondo de filtro)
 //  'auto'       -> intenta json y si no, dollar
 export function parseListings(html, mode = 'auto') {
-  const FLOOR = 1000; // los boletos de este evento valen miles; ignora montos pequeños (fees/filtros)
+  const FLOOR = 1000; // los boletos valen miles; ignora montos pequeños (fees/filtros)
 
   const jsonNums = (key) => {
     const re = new RegExp('"' + key + '":\\s*([0-9]+(?:\\.[0-9]+)?)', 'g');
@@ -85,21 +104,26 @@ export function parseListings(html, mode = 'auto') {
   const cnt = listingCount();
   const valid = prices.filter((p) => p >= FLOOR);
 
-  // --- dólar más bajo que se repite >=3 veces (Ticombo: ignora $200/$500 sueltos de filtros) ---
+  // --- Ticombo: el precio real más bajo, ignorando presets de filtro (redondos, múltiplos de 250) ---
   if (mode === 'dollarFreq') {
     const freq = {};
     valid.forEach((p) => (freq[p] = (freq[p] || 0) + 1));
-    const repeated = Object.keys(freq).map(Number).filter((p) => freq[p] >= 3).sort((a, b) => a - b);
-    const lowest = repeated.length ? repeated[0] : valid.length ? Math.min(...valid) : null;
+    // reales = aparecen >=2 veces y NO son múltiplos de 250 (los filtros son $2,500 / $3,000 / etc.)
+    const real = Object.keys(freq)
+      .map(Number)
+      .filter((p) => freq[p] >= 2 && p % 250 !== 0)
+      .sort((a, b) => a - b);
+    const nonRound = valid.filter((p) => p % 250 !== 0);
+    const lowest = real.length ? real[0] : nonRound.length ? Math.min(...nonRound) : null;
     return {
       lowest,
       highest: valid.length ? Math.max(...valid) : null,
-      average: median(valid),
+      average: median(nonRound.length ? nonRound : valid),
       listingCount: cnt,
     };
   }
 
-  // --- dólar más bajo (Viagogo) ---
+  // --- Viagogo: dólar más bajo ---
   if (!valid.length) return { lowest: null, highest: null, average: null, listingCount: cnt };
   return { lowest: Math.min(...valid), highest: Math.max(...valid), average: median(valid), listingCount: cnt };
 }
