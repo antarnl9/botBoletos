@@ -42,7 +42,7 @@ export const config = {
   eventUrl: process.env.EVENT_URL || '', // URL exacta a leer. Vacío = usa la del evento (API).
   scrapingbee: {
     apiKey: process.env.SCRAPINGBEE_API_KEY || '',
-    stealth: (process.env.SCRAPINGBEE_STEALTH || 'false').toLowerCase() === 'true',
+    stealth: (process.env.SCRAPINGBEE_STEALTH || 'true').toLowerCase() === 'true',
   },
 
   // --- Telegram ---
