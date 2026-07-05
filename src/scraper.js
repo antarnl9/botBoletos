@@ -1,17 +1,15 @@
-// Lee los precios reales de la página del evento usando ScrapingBee,
-// que sí pasa la protección Cloudflare (la API pública de SeatGeek no
-// expone los listados del Mundial).
+// Lee los precios reales de la página de un evento usando ScrapingBee,
+// que sí pasa la protección Cloudflare. Sirve para SeatGeek, Viagogo y StubHub.
 
 const SCRAPINGBEE = 'https://app.scrapingbee.com/api/v1/';
 
-export async function scrapeSeatGeek({ apiKey, url, stealth }) {
+export async function scrapePrices({ apiKey, url, stealth }) {
   const api = new URL(SCRAPINGBEE);
   api.searchParams.set('api_key', apiKey);
   api.searchParams.set('url', url);
   api.searchParams.set('render_js', 'true');
-  // Para sitios con Cloudflare (SeatGeek) el proxy stealth es el que pasa.
-  // OJO: stealth NO acepta block_resources / country_code / timeout (dan error 500),
-  // por eso en stealth solo mandamos lo mínimo.
+  // Cloudflare exige el proxy stealth. OJO: stealth NO acepta
+  // block_resources / country_code / timeout (dan error 500).
   if (stealth) {
     api.searchParams.set('stealth_proxy', 'true');
   } else {
@@ -20,7 +18,7 @@ export async function scrapeSeatGeek({ apiKey, url, stealth }) {
   }
 
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 150000); // stealth + render tarda ~90s
+  const timer = setTimeout(() => ctrl.abort(), 150000);
   try {
     const res = await fetch(api, { signal: ctrl.signal });
     if (!res.ok) {
@@ -34,10 +32,11 @@ export async function scrapeSeatGeek({ apiKey, url, stealth }) {
   }
 }
 
-// Los precios vienen embebidos como JSON en la página (Next.js __NEXT_DATA__ y
-// datos schema.org), NO como texto con "$". Leemos esos campos directamente.
+// Auto-detecta el formato:
+//  - SeatGeek: precios en campos JSON (lowest_price / listing_count).
+//  - Viagogo / StubHub: JSON en 0, precios como texto "$X,XXX".
 export function parseListings(html) {
-  const vals = (key) => {
+  const nums = (key) => {
     const re = new RegExp('"' + key + '":\\s*([0-9]+(?:\\.[0-9]+)?)', 'g');
     const out = [];
     let m;
@@ -45,19 +44,39 @@ export function parseListings(html) {
     return out;
   };
 
-  const lows = vals('lowest_price').filter((n) => n > 0);
-  const highs = vals('highest_price').filter((n) => n > 0);
-  const avgs = vals('average_price').filter((n) => n > 0);
-  const counts = vals('listing_count');
+  // --- Método 1: campos JSON (SeatGeek) ---
+  const jLows = nums('lowest_price').filter((n) => n > 0);
+  if (jLows.length) {
+    const jHighs = nums('highest_price').filter((n) => n > 0);
+    const jAvgs = nums('average_price').filter((n) => n > 0);
+    const jCnts = nums('listing_count');
+    return {
+      lowest: Math.min(...jLows),
+      highest: jHighs.length ? Math.max(...jHighs) : null,
+      average: jAvgs.length ? Math.round(jAvgs[0]) : null,
+      listingCount: jCnts.length ? Math.max(...jCnts) : null,
+    };
+  }
 
-  // Respaldo: datos estructurados schema.org (lowPrice / highPrice)
-  const ldLow = vals('lowPrice').filter((n) => n > 0);
-  const ldHigh = vals('highPrice').filter((n) => n > 0);
+  // --- Método 2: montos con "$" en el texto (Viagogo / StubHub) ---
+  const prices = [];
+  const re = /\$\s?(\d{1,3}(?:,\d{3})+|\d{3,6})(?:\.\d{2})?/g;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    const n = Number(m[1].replace(/,/g, ''));
+    if (n >= 100 && n <= 100000) prices.push(n);
+  }
+  const cm = html.match(/([\d,]{1,7})\s+(?:boletos|listados|tickets|listings?)\b/i);
+  const listingCount = cm ? Number(cm[1].replace(/,/g, '')) : null;
 
-  const lowest = lows.length ? Math.min(...lows) : ldLow.length ? Math.min(...ldLow) : null;
-  const highest = highs.length ? Math.max(...highs) : ldHigh.length ? Math.max(...ldHigh) : null;
-  const average = avgs.length ? Math.round(avgs.sort((a, b) => a - b)[Math.floor(avgs.length / 2)]) : null;
-  const listingCount = counts.length ? Math.max(...counts) : null;
-
-  return { lowest, highest, average, listingCount, sampleCount: lows.length + ldLow.length };
+  if (prices.length === 0) {
+    return { lowest: null, highest: null, average: null, listingCount };
+  }
+  prices.sort((a, b) => a - b);
+  return {
+    lowest: prices[0],
+    highest: prices[prices.length - 1],
+    average: prices[Math.floor(prices.length / 2)],
+    listingCount,
+  };
 }

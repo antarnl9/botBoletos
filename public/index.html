@@ -3,108 +3,96 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Precios · SeatGeek Bot</title>
+  <title>Precios · Mexico vs England</title>
   <style>
     :root {
-      --bg: #0f1115; --card: #181b22; --border: #262a33;
-      --text: #e8eaed; --muted: #9aa0aa; --accent: #35c15e; --warn: #f5a623;
+      --bg:#0f1115; --card:#181b22; --border:#262a33; --text:#e8eaed;
+      --muted:#9aa0aa; --accent:#35c15e; --warn:#f5a623;
     }
     @media (prefers-color-scheme: light) {
       :root { --bg:#f4f5f7; --card:#fff; --border:#e3e5ea; --text:#1a1d24; --muted:#6b7280; }
     }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: var(--bg); color: var(--text); padding: 24px 16px; line-height: 1.4;
-    }
-    .wrap { max-width: 820px; margin: 0 auto; }
-    h1 { font-size: 1.4rem; margin: 0 0 4px; }
-    .sub { color: var(--muted); font-size: .85rem; margin: 0 0 20px; }
-    .meta { display:flex; flex-wrap:wrap; gap:8px 16px; font-size:.8rem; color:var(--muted); margin-bottom:16px; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+      background:var(--bg); color:var(--text); padding:24px 16px; line-height:1.4; }
+    .wrap { max-width:760px; margin:0 auto; }
+    h1 { font-size:1.35rem; margin:0 0 2px; }
+    .place { color:var(--muted); font-size:.9rem; margin:0 0 16px; }
+    .meta { display:flex; flex-wrap:wrap; gap:8px; font-size:.78rem; color:var(--muted); margin-bottom:18px; }
     .badge { background:var(--card); border:1px solid var(--border); border-radius:20px; padding:4px 12px; }
     .badge.demo { color:var(--warn); border-color:var(--warn); }
-    .card {
-      background: var(--card); border:1px solid var(--border); border-radius:14px;
-      padding:16px 18px; margin-bottom:12px;
-    }
-    .card.hot { border-color: var(--accent); box-shadow:0 0 0 1px var(--accent) inset; }
-    .card h2 { font-size:1.05rem; margin:0 0 6px; }
-    .row { display:flex; flex-wrap:wrap; justify-content:space-between; gap:8px; align-items:baseline; }
-    .place { color:var(--muted); font-size:.9rem; }
-    .prices { display:flex; flex-wrap:wrap; gap:18px; margin-top:12px; }
+    .badge.hot { color:var(--accent); border-color:var(--accent); }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:16px 18px; margin-bottom:12px; }
+    .card.cheapest { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent) inset; }
+    .card.hot { border-color:var(--accent); }
+    .chead { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:12px; }
+    .chead .name { font-size:1.05rem; font-weight:700; display:flex; align-items:center; gap:8px; }
+    .tag { font-size:.65rem; background:var(--accent); color:#04140a; border-radius:6px; padding:2px 7px; font-weight:700; text-transform:uppercase; }
+    .buy { font-size:.82rem; color:var(--accent); text-decoration:none; white-space:nowrap; }
+    .prices { display:flex; flex-wrap:wrap; gap:18px; }
     .price { display:flex; flex-direction:column; }
-    .price .label { font-size:.7rem; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
-    .price .val { font-size:1.1rem; font-weight:700; }
-    .price.low .val { color: var(--accent); }
-    .buy { font-size:.82rem; color:var(--accent); text-decoration:none; }
-    .empty { text-align:center; color:var(--muted); padding:40px 0; }
-    .err { color:var(--warn); font-size:.85rem; }
-    footer { text-align:center; color:var(--muted); font-size:.75rem; margin-top:24px; }
+    .price .label { font-size:.68rem; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+    .price .val { font-size:1.15rem; font-weight:700; }
+    .price.low .val { color:var(--accent); }
+    .cerr { color:var(--warn); font-size:.82rem; }
+    .empty { text-align:center; color:var(--muted); padding:30px 0; }
+    footer { text-align:center; color:var(--muted); font-size:.75rem; margin-top:22px; }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>🎟️ Precios de boletos</h1>
-    <p class="sub">Monitoreo automático vía SeatGeek. La lista se actualiza sola.</p>
+    <h1 id="title">🎟️ Cargando…</h1>
+    <p class="place" id="place"></p>
     <div class="meta" id="meta"></div>
-    <div id="list"><p class="empty">Cargando…</p></div>
+    <div id="cards"></div>
     <footer>Se actualiza cada 60&nbsp;s · <span id="clock"></span></footer>
   </div>
 
   <script>
     const money = (c, n) => n == null ? 's/d' : `${c} $${Number(n).toLocaleString('en-US')}`;
-    const fmtDate = (iso) => {
-      if (!iso) return 'Fecha por confirmar';
-      try { return new Date(iso).toLocaleString('es-MX', { dateStyle:'medium', timeStyle:'short' }); }
-      catch { return iso; }
-    };
-    const venue = (v) => v ? [v.name, v.city, v.country].filter(Boolean).join(', ') : 'Lugar por confirmar';
+    const fmtDate = (iso) => { if (!iso) return ''; try { return new Date(iso).toLocaleString('es-MX',{dateStyle:'medium',timeStyle:'short'}); } catch { return iso; } };
+    const venue = (v) => v ? [v.name, v.city, v.country].filter(Boolean).join(', ') : '';
 
     async function load() {
-      try {
-        const r = await fetch('/api/prices');
-        const s = await r.json();
-        render(s);
-      } catch (e) {
-        document.getElementById('list').innerHTML = `<p class="err">No se pudo conectar al servidor.</p>`;
-      }
+      try { render(await (await fetch('/api/prices')).json()); }
+      catch { document.getElementById('cards').innerHTML = '<p class="empty">No se pudo conectar al servidor.</p>'; }
       document.getElementById('clock').textContent = 'últ. carga ' + new Date().toLocaleTimeString('es-MX');
     }
 
     function render(s) {
-      const meta = document.getElementById('meta');
       const cur = s.currency || 'USD';
-      meta.innerHTML = [
-        s.demoMode ? `<span class="badge demo">MODO DEMO (sin API real)</span>` : `<span class="badge">API en vivo</span>`,
-        s.threshold ? `<span class="badge">Aviso si baja de ${money(cur, s.threshold)}</span>` : `<span class="badge">Sin umbral de aviso</span>`,
+      document.getElementById('title').textContent = '🎟️ ' + (s.event?.title || 'Evento');
+      document.getElementById('place').textContent = [venue(s.event?.venue), fmtDate(s.event?.datetime)].filter(Boolean).join('  ·  ');
+
+      const cheapLabel = s.cheapest?.label;
+      document.getElementById('meta').innerHTML = [
+        s.demoMode ? '<span class="badge demo">SIN API KEY</span>' : '',
+        s.threshold ? `<span class="badge">Aviso si baja de ${money(cur, s.threshold)}</span>` : '<span class="badge">Sin umbral</span>',
+        s.cheapest ? `<span class="badge hot">Más barato: ${money(cur, s.cheapest.lowest)} en ${cheapLabel}</span>` : '',
+        s.inScrapeWindow === false ? '<span class="badge">⏸️ fuera de horario (pausado)</span>' : '',
         s.lastCheck ? `<span class="badge">Últ. chequeo: ${fmtDate(s.lastCheck)}</span>` : '',
       ].filter(Boolean).join('');
 
-      const list = document.getElementById('list');
-      if (s.error) {
-        list.innerHTML = `<div class="card"><p class="err">⚠️ ${s.error}</p></div>`;
-        return;
-      }
-      if (!s.events || !s.events.length) {
-        list.innerHTML = `<p class="empty">Sin eventos que coincidan todavía.</p>`;
-        return;
-      }
+      const cards = document.getElementById('cards');
+      if (!s.sources || !s.sources.length) { cards.innerHTML = '<p class="empty">Aún sin datos de precios.</p>'; return; }
 
-      list.innerHTML = s.events.map((e) => {
-        const hot = s.threshold && e.stats.lowest != null && e.stats.lowest <= s.threshold;
+      cards.innerHTML = s.sources.map((src) => {
+        const isCheapest = cheapLabel && src.label === cheapLabel && src.lowest != null;
+        const hot = s.threshold && src.lowest != null && src.lowest <= s.threshold;
         return `
-          <div class="card ${hot ? 'hot' : ''}">
-            <div class="row">
-              <h2>${e.title}</h2>
-              ${e.url ? `<a class="buy" href="${e.url}" target="_blank" rel="noopener">Ver en SeatGeek →</a>` : ''}
+          <div class="card ${isCheapest ? 'cheapest' : ''} ${hot ? 'hot' : ''}">
+            <div class="chead">
+              <div class="name">${src.label} ${isCheapest ? '<span class="tag">más barato</span>' : ''}</div>
+              ${src.url ? `<a class="buy" href="${src.url}" target="_blank" rel="noopener">Ver / comprar →</a>` : ''}
             </div>
-            <div class="place">📍 ${venue(e.venue)} &nbsp;·&nbsp; 📅 ${fmtDate(e.datetime)}</div>
-            <div class="prices">
-              <div class="price ${hot ? 'low' : ''}"><span class="label">Más barato</span><span class="val">${money(cur, e.stats.lowest)}</span></div>
-              <div class="price"><span class="label">Promedio</span><span class="val">${money(cur, e.stats.median)}</span></div>
-              <div class="price"><span class="label">Más alto</span><span class="val">${money(cur, e.stats.highest)}</span></div>
-              <div class="price"><span class="label">Listados</span><span class="val">${e.stats.listingCount ?? 0}</span></div>
-            </div>
+            ${src.error && src.lowest == null
+              ? `<div class="cerr">⚠️ ${src.error.slice(0,120)}</div>`
+              : `<div class="prices">
+                  <div class="price ${hot ? 'low' : ''}"><span class="label">Más barato</span><span class="val">${money(cur, src.lowest)}</span></div>
+                  <div class="price"><span class="label">Promedio</span><span class="val">${money(cur, src.average)}</span></div>
+                  <div class="price"><span class="label">Más alto</span><span class="val">${money(cur, src.highest)}</span></div>
+                  <div class="price"><span class="label">Listados</span><span class="val">${src.listingCount ?? 's/d'}</span></div>
+                </div>`}
           </div>`;
       }).join('');
     }

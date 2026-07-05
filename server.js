@@ -3,172 +3,141 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { config, isDemoMode } from './src/config.js';
 import { fetchEvents } from './src/seatgeek.js';
-import { scrapeSeatGeek } from './src/scraper.js';
+import { scrapePrices } from './src/scraper.js';
 import { sendTelegram } from './src/telegram.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// ---- Estado en memoria (lo que el front consulta) ----
 const state = {
-  events: [],
+  event: null, // { title, datetime, venue }
+  sources: [], // [ { label, url, lowest, highest, average, listingCount, error } ]
+  cheapest: null, // la fuente con el precio más bajo
   lastCheck: null,
   error: null,
+  scrapeError: null,
   demoMode: isDemoMode,
   threshold: config.priceThreshold,
   currency: config.currency,
   pollIntervalMinutes: config.pollIntervalMinutes,
-  source: 'api', // 'api' | 'scrape' | 'scrape-pausado'
-  scrapeError: null,
   inScrapeWindow: true,
 };
 
-// Anti-spam: por evento guardamos el ultimo precio bajo que ya avisamos.
-const alertState = new Map();
+let lastAlertedLow = null;
 
 function fmtMoney(n) {
   if (n == null) return 's/d';
   return `${config.currency} $${Number(n).toLocaleString('en-US')}`;
 }
-
 function fmtVenue(v) {
   if (!v) return 'Lugar por confirmar';
   return [v.name, v.city, v.country].filter(Boolean).join(', ');
 }
 
-function fmtDate(iso) {
-  if (!iso) return 'Fecha por confirmar';
-  try {
-    return new Date(iso).toLocaleString('es-MX', {
-      dateStyle: 'medium',
-      timeStyle: 'short',
-    });
-  } catch {
-    return iso;
-  }
-}
-
+// ¿Estamos dentro de la ventana horaria para scrapear? (ahorra créditos)
 function withinScrapeWindow() {
   const s = config.scrapeStartHour;
   const e = config.scrapeEndHour;
-  if (s <= 0 && e >= 24) return true; // sin ventana = siempre
+  if (s <= 0 && e >= 24) return true;
   const h = Number(
     new Intl.DateTimeFormat('en-US', { timeZone: config.scrapeTz, hour: '2-digit', hour12: false }).format(new Date())
   );
   return s <= e ? h >= s && h < e : h >= s || h < e; // soporta ventanas que cruzan medianoche
 }
 
-async function maybeAlert(ev) {
-  const low = ev.stats.lowest;
+async function maybeAlert() {
+  const c = state.cheapest;
+  const low = c ? c.lowest : null;
   if (!config.priceThreshold || low == null) return;
 
-  const key = String(ev.id);
-  const prev = alertState.get(key);
-
   if (low <= config.priceThreshold) {
-    // Avisa la primera vez que baja del umbral, y de nuevo si marca un nuevo minimo.
-    if (!prev || low < prev.lastAlertedLow) {
+    // Avisa la primera vez que baja del límite, y de nuevo si marca un nuevo mínimo.
+    if (lastAlertedLow == null || low < lastAlertedLow) {
       const text =
-        `🎟️ <b>¡Bajo el precio!</b>\n` +
-        `<b>${ev.title}</b>\n` +
-        `📍 ${fmtVenue(ev.venue)}\n` +
-        `📅 ${fmtDate(ev.datetime)}\n` +
-        `💰 Mas barato: <b>${fmtMoney(low)}</b> (umbral ${fmtMoney(config.priceThreshold)})\n` +
-        `📊 Mediana ${fmtMoney(ev.stats.median)} · Mas alto ${fmtMoney(ev.stats.highest)} · ${ev.stats.listingCount} listados` +
-        (ev.url ? `\n🔗 ${ev.url}` : '');
-
+        `🎟️ <b>¡Bajó de tu límite!</b>\n` +
+        `<b>${state.event?.title || 'Evento'}</b>\n` +
+        `📍 ${fmtVenue(state.event?.venue)}\n` +
+        `💰 Más barato: <b>${fmtMoney(low)}</b> en <b>${c.label}</b> (límite ${fmtMoney(config.priceThreshold)})\n` +
+        `🔗 ${c.url}`;
       await sendTelegram({ token: config.telegram.token, chatId: config.telegram.chatId, text });
-      alertState.set(key, { lastAlertedLow: low });
-      console.log(`[alert] Enviado para "${ev.title}" a ${fmtMoney(low)}`);
+      lastAlertedLow = low;
+      console.log(`[alert] ${fmtMoney(low)} en ${c.label}`);
     }
-  } else if (prev) {
-    // Volvio a subir por encima del umbral: rearmamos para la proxima baja.
-    alertState.delete(key);
+  } else {
+    lastAlertedLow = null; // volvió a subir: rearmamos para la próxima baja
   }
 }
 
 async function poll() {
   try {
-    const events = await fetchEvents({
-      clientId: config.seatgeekClientId,
-      query: config.eventQuery,
-      titleContains: config.titleContains,
-      eventId: config.eventId,
-    });
-
-    // Los eventos del Mundial no traen precios por la API pública. Si hay
-    // ScrapingBee configurado (y estamos dentro de la ventana horaria), leemos
-    // los precios reales de la página web.
-    const inWindow = withinScrapeWindow();
-    state.inScrapeWindow = inWindow;
-    if (config.scrapingbee.apiKey && events.length && inWindow) {
-      state.source = 'scrape';
-      for (const ev of events) {
-        const target = config.eventUrl || ev.url;
-        if (!target) continue;
-        try {
-          const s = await scrapeSeatGeek({
-            apiKey: config.scrapingbee.apiKey,
-            stealth: config.scrapingbee.stealth,
-            url: target,
-          });
-          if (s.lowest != null) {
-            ev.stats.lowest = s.lowest;
-            ev.stats.highest = s.highest ?? ev.stats.highest;
-            ev.stats.median = s.average ?? ev.stats.median;
-          }
-          if (s.listingCount != null) ev.stats.listingCount = s.listingCount;
-          state.scrapeError = null;
-          console.log(`[scrape] ${ev.title}: mas barato ${s.lowest}, ${s.listingCount} listados`);
-        } catch (se) {
-          state.scrapeError = se.message;
-          console.error('[scrape] error:', se.message);
-        }
-      }
-    } else if (config.scrapingbee.apiKey && !inWindow) {
-      state.source = 'scrape-pausado'; // fuera de ventana horaria: no gasta créditos
-    } else {
-      state.source = 'api';
+    // 1) Metadata del evento (título / estadio / fecha) desde la API oficial (gratis)
+    try {
+      const evs = await fetchEvents({
+        clientId: config.seatgeekClientId,
+        query: config.eventQuery,
+        titleContains: config.titleContains,
+        eventId: config.eventId,
+      });
+      if (evs[0]) state.event = { title: evs[0].title, datetime: evs[0].datetime, venue: evs[0].venue };
+    } catch (e) {
+      console.error('[meta] error:', e.message);
     }
 
-    state.events = events;
+    // 2) Precios: scrapear cada fuente (si hay key y estamos en ventana horaria)
+    const inWindow = withinScrapeWindow();
+    state.inScrapeWindow = inWindow;
+
+    if (config.scrapingbee.apiKey && inWindow) {
+      const results = [];
+      for (const src of config.sources) {
+        const r = { label: src.label, url: src.url, lowest: null, highest: null, average: null, listingCount: null, error: null };
+        try {
+          Object.assign(r, await scrapePrices({ apiKey: config.scrapingbee.apiKey, stealth: config.scrapingbee.stealth, url: src.url }));
+        } catch (e) {
+          r.error = e.message;
+        }
+        results.push(r);
+        console.log(`[scrape] ${src.label}: ${r.lowest ?? 'error'} (${r.listingCount ?? '?'} listados)`);
+      }
+      state.sources = results;
+      state.scrapeError = results.length && results.every((r) => r.error) ? results[0].error : null;
+    } else if (!config.scrapingbee.apiKey) {
+      state.sources = config.sources.map((s) => ({ label: s.label, url: s.url, lowest: null, error: 'falta SCRAPINGBEE_API_KEY' }));
+    }
+    // Fuera de ventana: dejamos los últimos precios vistos (no gastamos créditos).
+
+    // 3) El más barato entre las fuentes con precio
+    const withPrice = state.sources.filter((s) => s.lowest != null);
+    state.cheapest = withPrice.length ? withPrice.reduce((a, b) => (b.lowest < a.lowest ? b : a)) : null;
+
     state.lastCheck = new Date().toISOString();
     state.error = null;
-    for (const ev of events) await maybeAlert(ev);
-    console.log(`[poll] ${events.length} evento(s). fuente=${state.source} ${isDemoMode ? '(DEMO)' : ''}`);
+    await maybeAlert();
+    console.log(`[poll] ventana=${inWindow} · más barato=${state.cheapest ? state.cheapest.lowest + ' (' + state.cheapest.label + ')' : 's/d'}`);
   } catch (e) {
     state.error = e.message;
     console.error('[poll] error:', e.message);
   }
 }
 
-// ---- Servidor web ----
 const app = express();
-
 app.get('/api/prices', (_req, res) => res.json(state));
 app.get('/api/health', (_req, res) => res.json({ ok: true, lastCheck: state.lastCheck }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.listen(config.port, () => {
   console.log(`🚀 Servidor en http://localhost:${config.port}`);
-  console.log(`   Modo: ${isDemoMode ? 'DEMO (sin SEATGEEK_CLIENT_ID)' : 'API real'}`);
-  console.log(config.eventId
-    ? `   Evento por ID: ${config.eventId}`
-    : `   Busqueda: "${config.eventQuery}"  filtro titulo: [${config.titleContains.join(', ') || '—'}]`);
+  console.log(`   Fuentes: ${config.sources.map((s) => s.label).join(', ')}`);
   console.log(`   Umbral de aviso: ${config.priceThreshold ? fmtMoney(config.priceThreshold) : 'DESACTIVADO'}`);
-  console.log(`   Revisa cada ${config.pollIntervalMinutes} min.`);
   if (config.scrapingbee.apiKey) {
-    const perDay = Math.round((24 * 60) / config.pollIntervalMinutes);
-    const credits = perDay * (config.scrapingbee.stealth ? 75 : 25);
-    console.log(`   Scraping: ON (${config.scrapingbee.stealth ? 'stealth 75' : 'premium 25'} créditos/consulta)`);
     const win = config.scrapeStartHour <= 0 && config.scrapeEndHour >= 24
-      ? 'siempre (sin ventana)'
+      ? 'siempre'
       : `${config.scrapeStartHour}:00–${config.scrapeEndHour}:00 ${config.scrapeTz}`;
-    console.log(`   Ventana de scraping: ${win}`);
-    console.log(`   ⚠️  Dentro de la ventana, a cada ${config.pollIntervalMinutes} min gastas ${config.scrapingbee.stealth ? 75 : 25} créditos/consulta (free = 1,000).`);
+    const perPoll = config.sources.length * (config.scrapingbee.stealth ? 75 : 25);
+    console.log(`   Scraping: ON · ventana ${win} · cada ${config.pollIntervalMinutes} min · ~${perPoll} créditos/ronda (${config.sources.length} fuentes)`);
   } else {
-    console.log(`   Scraping: OFF (solo API oficial; el Mundial no traerá precios)`);
+    console.log('   Scraping: OFF (falta SCRAPINGBEE_API_KEY)');
   }
 
-  poll(); // primera revision inmediata
+  poll(); // primera revisión inmediata
   setInterval(poll, config.pollIntervalMinutes * 60 * 1000);
 });
