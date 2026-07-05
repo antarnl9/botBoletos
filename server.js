@@ -15,6 +15,7 @@ const state = {
   demoMode: isDemoMode,
   threshold: config.priceThreshold,
   currency: config.currency,
+  pollIntervalMinutes: config.pollIntervalMinutes,
 };
 
 // Anti-spam: por evento guardamos el ultimo precio bajo que ya avisamos.

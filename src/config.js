@@ -34,7 +34,7 @@ export const config = {
   // Precio (en la moneda que devuelve la API, normalmente USD) por debajo del cual quieres que te avise.
   // 0 = desactivado (solo se muestra el front, no se manda Telegram).
   priceThreshold: num(process.env.PRICE_THRESHOLD, 0),
-  pollIntervalMinutes: num(process.env.POLL_INTERVAL_MINUTES, 15),
+  pollIntervalMinutes: num(process.env.POLL_INTERVAL_MINUTES, 2),
   currency: process.env.CURRENCY || 'USD',
 
   // --- Telegram ---
