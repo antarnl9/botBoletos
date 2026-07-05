@@ -5,9 +5,23 @@ const SG_BASE = 'https://api.seatgeek.com/2';
  * Si no hay client_id, regresa datos de DEMO para que el front y las
  * alertas se puedan probar sin credenciales todavia.
  */
-export async function fetchEvents({ clientId, query, titleContains }) {
+export async function fetchEvents({ clientId, query, titleContains, eventId }) {
   if (!clientId) {
     return mockEvents();
+  }
+
+  // Ruta preferida: pedir el evento directo por su ID (mucho más confiable
+  // que la búsqueda por texto, que a veces no devuelve el partido correcto).
+  if (eventId) {
+    const url = new URL(`${SG_BASE}/events/${eventId}`);
+    url.searchParams.set('client_id', clientId);
+    const res = await fetch(url);
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`SeatGeek respondio ${res.status} para el ID ${eventId}: ${body.slice(0, 300)}`);
+    }
+    const ev = await res.json();
+    return ev && ev.id ? [normalize(ev)] : [];
   }
 
   const url = new URL(`${SG_BASE}/events`);

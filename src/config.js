@@ -17,7 +17,12 @@ export const config = {
 
   // --- SeatGeek ---
   seatgeekClientId: process.env.SEATGEEK_CLIENT_ID || '',
-  // Texto de búsqueda que se manda a la API (parámetro q)
+  // ID exacto del evento en SeatGeek (lo más confiable). Se saca de la URL del evento:
+  // seatgeek.com/.../17650335  -> EVENT_ID=17650335
+  // Default: Mexico vs England, Round of 16, World Cup 2026 (Estadio Banorte).
+  // Si tiene valor, se ignora la búsqueda por texto de abajo.
+  eventId: process.env.EVENT_ID || '17650335',
+  // Texto de búsqueda que se manda a la API (parámetro q) — solo si NO hay EVENT_ID.
   eventQuery: process.env.EVENT_QUERY || 'mexico england',
   // Filtro extra del lado nuestro: el título del evento debe contener TODAS estas palabras.
   // Vacío = no filtrar. Default apunta a "Mexico vs England".

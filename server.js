@@ -77,6 +77,7 @@ async function poll() {
       clientId: config.seatgeekClientId,
       query: config.eventQuery,
       titleContains: config.titleContains,
+      eventId: config.eventId,
     });
     state.events = events;
     state.lastCheck = new Date().toISOString();
@@ -99,7 +100,9 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.listen(config.port, () => {
   console.log(`🚀 Servidor en http://localhost:${config.port}`);
   console.log(`   Modo: ${isDemoMode ? 'DEMO (sin SEATGEEK_CLIENT_ID)' : 'API real'}`);
-  console.log(`   Busqueda: "${config.eventQuery}"  filtro titulo: [${config.titleContains.join(', ') || '—'}]`);
+  console.log(config.eventId
+    ? `   Evento por ID: ${config.eventId}`
+    : `   Busqueda: "${config.eventQuery}"  filtro titulo: [${config.titleContains.join(', ') || '—'}]`);
   console.log(`   Umbral de aviso: ${config.priceThreshold ? fmtMoney(config.priceThreshold) : 'DESACTIVADO'}`);
   console.log(`   Revisa cada ${config.pollIntervalMinutes} min.`);
 
