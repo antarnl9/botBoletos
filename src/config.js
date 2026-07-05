@@ -37,6 +37,14 @@ export const config = {
   pollIntervalMinutes: num(process.env.POLL_INTERVAL_MINUTES, 2),
   currency: process.env.CURRENCY || 'USD',
 
+  // --- Scraping (para eventos que SeatGeek no expone en su API, ej. Mundial) ---
+  // Si hay API key, el bot lee los precios reales de la página (pasa Cloudflare).
+  eventUrl: process.env.EVENT_URL || '', // URL exacta a leer. Vacío = usa la del evento (API).
+  scrapingbee: {
+    apiKey: process.env.SCRAPINGBEE_API_KEY || '',
+    stealth: (process.env.SCRAPINGBEE_STEALTH || 'false').toLowerCase() === 'true',
+  },
+
   // --- Telegram ---
   telegram: {
     token: process.env.TELEGRAM_BOT_TOKEN || '',
