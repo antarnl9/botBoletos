@@ -67,7 +67,13 @@ async function maybeAlert() {
   }
 }
 
+let polling = false;
 async function poll() {
+  if (polling) {
+    console.log('[poll] la ronda anterior sigue corriendo; salto esta.');
+    return;
+  }
+  polling = true;
   try {
     // 1) Metadata del evento (título / estadio / fecha) desde la API oficial (gratis)
     try {
@@ -116,6 +122,8 @@ async function poll() {
   } catch (e) {
     state.error = e.message;
     console.error('[poll] error:', e.message);
+  } finally {
+    polling = false;
   }
 }
 
