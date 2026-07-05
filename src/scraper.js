@@ -15,9 +15,10 @@ export async function scrapeSeatGeek({ apiKey, url, stealth }) {
   // proxy para pasar Cloudflare: stealth (75 créditos) es más potente; premium (25) más barato
   if (stealth) api.searchParams.set('stealth_proxy', 'true');
   else api.searchParams.set('premium_proxy', 'true');
+  api.searchParams.set('timeout', '120000'); // ScrapingBee espera hasta 120s a la página
 
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 70000);
+  const timer = setTimeout(() => ctrl.abort(), 135000); // nosotros esperamos hasta 135s
   try {
     const res = await fetch(api, { signal: ctrl.signal });
     if (!res.ok) {
